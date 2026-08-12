@@ -1,0 +1,124 @@
+pipeline {
+    agent any
+    
+    tools {
+        nodejs 'nodejs23'
+    }
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('Git CheckOut') {
+            steps {
+               git branch: 'docker-build-deploy', url: 'https://github.com/Priyanka4pq/3-tier-DevSecOps.git'
+            }
+        }
+        
+        stage('Frontend Compilation') {
+            steps {
+               dir('client') {
+                   sh 'find . -name ".*js" -exec node --check {} +'
+               }
+            }
+        }
+        
+        stage('Backend Compilation') {
+            steps {
+               dir('api') {
+                   sh 'find . -name ".*js" -exec node --check {} +'
+               }
+            }
+        }
+        
+        stage('GitLeaks Scan') {
+            steps {
+                sh '''
+                    gitleaks detect \
+                        --source . \
+                        --report-path gitleaks-report.json \
+                        --report-format json \
+                        --verbose \
+                        --exit-code 1
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'gitleaks-report.json', allowEmptyArchive: true
+                }
+            }
+        }
+
+        
+        stage('SonarQube Analysis') {
+            steps {
+               withSonarQubeEnv('sonar') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=NodeJS-Project \
+                            -Dsonar.projectKey=NodeJS-Project '''
+                }
+            }
+        }
+        
+        stage('Quality Gate Check') {
+            steps {
+               timeout(time: 1, unit: 'HOURS') {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                }
+            }
+        }
+        
+        stage('Trivy FS Scan') {
+            steps {
+               sh "trivy fs --format table -o fs-report.html ."
+            }
+        }
+        
+        stage('Build-Tag  & Push Backend Docker Image') {
+            steps {
+               script {
+                   withDockerRegistry(credentialsId: 'docker-cred') {
+                        dir('api') {
+                            sh 'docker build -t priyanka4pq/backend:latest .'
+                            sh 'trivy image --format table -o backend-image-report.html priyanka4pq/backend:latest'
+                            sh 'docker push priyanka4pq/backend:latest'
+                        }
+                    }
+               }
+            }
+        }
+        
+        stage('Build-Tag & Push Frontend Docker Image') {
+            steps {
+               script {
+                   withDockerRegistry(credentialsId: 'docker-cred') {
+                        dir('client') {
+                            sh 'docker build -t priyanka4pq/frontend:latest .'
+                            sh 'trivy image --format table -o backend-image-report.html priyanka4pq/backend:latest'
+                            sh 'docker push priyanka4pq/frontend:latest'
+                        }
+                    }
+               }
+            }
+        }
+        
+        stage('Docker Deploy via Compose') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'db-password', variable: 'DB_PASSWORD'),
+                    string(credentialsId: 'db-name', variable: 'DB_NAME'),
+                    string(credentialsId: 'jwt-secret', variable: 'JWT_SECRET')
+                ]) {
+                sh '''
+                    cat > .env << EOF
+                    DB_PASSWORD=${DB_PASSWORD}
+                    DB_NAME=${DB_NAME}
+                    JWT_SECRET=${JWT_SECRET}
+                    EOF
+                    docker-compose up -d
+                    '''
+                    }
+                }
+            }
+        
+    }
+}
