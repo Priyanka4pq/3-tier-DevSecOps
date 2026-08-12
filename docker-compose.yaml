@@ -1,0 +1,37 @@
+version: '3.8'
+services:
+  mysql:
+    image: mysql:8
+    container_name: mysql
+    ports:
+      - "3306:3306"
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
+  backend:
+    build: ./api
+    container_name: backend-api
+    environment:
+      DB_HOST: mysql
+      DB_USER: root
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      JWT_SECRET: ${JWT_SECRET}
+      RESET_ADMIN_PASS: 'true'
+    depends_on:
+      - mysql
+    ports:
+      - "5000:5000"
+  frontend:
+    build: ./client
+    container_name: frontend-react
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+volumes:
+  mysql-data:
