@@ -57,7 +57,7 @@ spec:
     storage: 5Gi
   accessModes:
    - ReadWriteOnce
-  storageClassName: ebc-sc
+  storageClassName: ebs-sc
   persistentVolumeReclaimPolicy: Retain
   hostPath:
     path: /mnt/data/mysql
@@ -89,40 +89,48 @@ spec:
   selector:
     matchLabels:
       app: mysql
+
   template:
     metadata:
       labels:
         app: mysql
+
     spec:
       containers:
-       - name: mysql
-         image: mysql:8
-         env:
-          - name: MYSQL_ROOT_PASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: mysql-secret
-                key: MYSQL_ROOT_PASSWORD
-          - name: MYSQL_DATABASE
-            valueFrom:
-              configMapKeyRef:
-                name: mysql-config
-                key: MYSQL_DATABASE
-        ports:
-         - containerPort: 3306
-        volumeMounts:
-         - name: mysql-storage
-           mountPath: /mnt/data/mysql
-         - name: initdb
-           mountPath: /docker-entrypoint-initdb.d
-    volumes:
+        - name: mysql
+          image: mysql:8
+
+          ports:
+            - containerPort: 3306
+
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_ROOT_PASSWORD
+
+            - name: MYSQL_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: mysql-config
+                  key: MYSQL_DATABASE
+
+          volumeMounts:
+            - name: mysql-storage
+              mountPath: /var/lib/mysql
+
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+
+      volumes:
         - name: mysql-storage
           persistentVolumeClaim:
-            claimName: mysql-pv
+            claimName: mysql-pvc
+
         - name: initdb
           configMap:
             name: mysql-initdb-config
-
 ---
 
 apiVersion: v1
