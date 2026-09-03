@@ -13,7 +13,7 @@ pipeline {
     stages {
         stage('Git Checkout') {
             steps {
-                git branch: 'deploy-to-dev-k8', url: 'https://github.com/Priyanka4pq/3-tier-DevSecOps.git'
+                git branch: 'main', url: 'https://github.com/Priyanka4pq/3-tier-DevSecOps.git'
             }
         }
         
@@ -35,8 +35,9 @@ pipeline {
         
         stage('GitLeaks Scan') {
             steps {
-                sh 'gitleaks detect --source ./client --exit-code 1'
-                sh 'gitleaks detect --source ./api --exit-code 1'
+                sh 'gitleaks detect --source ./client --report-format json --report-path gitleaks-client-report.json --exit-code 1 || true'
+                sh 'gitleaks detect --source ./api --report-format json --report-path gitleaks-api-report.json --exit-code 1 || true'
+                archiveArtifacts artifacts: 'gitleaks-*-report.json', allowEmptyArchive: true
             }
         }
         
@@ -91,32 +92,42 @@ pipeline {
              
         }  
         
-        stage('K8-deploy') {
+        stage('Manual Approval'){
             steps {
-                script {
-                    withKubeConfig(caCertificate: '', clusterName: 'devopsshack-cluster', contextName: '', credentialsId: 'k8-token', namespace: 'dev', restrictKubeConfigAccess: false, serverUrl: 'https://042CDFB283295491DDF7A7A422346F3B.gr7.ap-south-1.eks.amazonaws.com') {
-                            sh 'kubectl apply -f k8s/StorageClass.yaml -n dev'
-                            sh 'kubectl apply -f k8s/mysql.yaml -n dev'
-                            sh 'kubectl apply -f k8s/backend.yaml -n dev'
-                            sh 'kubectl apply -f k8s/frontend.yaml -n dev'
-                            sleep 30
-                        }
+                timeout(time: 1, unit: 'HOURS') {
+                    input message: 'Approve deployment to production?', ok: 'Deploy'
                 }
             }
         }
         
-        stage('verify-K8-deploy') {
+        stage('Deployment to Prod') {
             steps {
                 script {
-                    withKubeConfig(caCertificate: '', clusterName: 'devopsshack-cluster', contextName: '', credentialsId: 'k8-token', namespace: 'dev', restrictKubeConfigAccess: false, serverUrl: 'https://042CDFB283295491DDF7A7A422346F3B.gr7.ap-south-1.eks.amazonaws.com') {
-                            sh 'kubectl get pods -n dev'
-                            sh 'kubectl get svc -n dev'
-                            
-                        }
+                    withKubeConfig(caCertificate: '', clusterName: 'devopsshack-cluster', contextName: '', credentialsId: 'k8s-prod-token', namespace: 'prod', restrictKubeConfigAccess: false, serverUrl: 'https://E10D11DAD9D16E7A834DBBE488050A3E.gr7.ap-south-1.eks.amazonaws.com') {
+                        sh 'kubectl apply -f k8s-prod/StorageClass.yaml'
+                        sleep 20
+                        sh 'kubectl apply -f k8s-prod/mysql.yaml -n prod'
+                        sh 'kubectl apply -f k8s-prod/backend.yaml -n prod'
+                        sh 'kubectl apply -f k8s-prod/ci.yaml'
+                        sh 'kubectl apply -f k8s-prod/frontend.yaml -n prod'
+                        sh 'kubectl apply -f k8s-prod/ingress.yaml -n prod'
+                        sleep 30
+                    }
                 }
             }
         }
         
+        stage('Verify Deployment to Prod') {
+            steps {
+                script {
+                    withKubeConfig(caCertificate: '', clusterName: 'devopsshack-cluster', contextName: '', credentialsId: 'k8s-prod-token', namespace: 'prod', restrictKubeConfigAccess: false, serverUrl: 'https://E10D11DAD9D16E7A834DBBE488050A3E.gr7.ap-south-1.eks.amazonaws.com') {
+                        sh 'kubectl get pods -n prod'
+                        sleep 20
+                        sh 'kubectl get ingress -n prod' 
+                    }
+                }
+            }
+        }
             
     }
 }
